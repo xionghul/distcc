@@ -704,6 +704,7 @@ dcc_build_somewhere(char *argv[],
     struct dcc_hostdef *host = NULL;
     char *discrepancy_filename = NULL;
     char **new_argv;
+    int dist_lto = 0;
 
     max_retries = dcc_get_max_retries();
 
@@ -720,7 +721,7 @@ dcc_build_somewhere(char *argv[],
 
     /* FIXME: this may leak memory for argv. */
 
-    ret = dcc_scan_args(argv, &input_fname, &output_fname, &new_argv);
+    ret = dcc_scan_args(argv, &input_fname, &output_fname, &new_argv, &dist_lto);
     dcc_free_argv(argv);
     argv = new_argv;
     if (!getenv("DISTCC_NO_REWRITE_CROSS")) {
@@ -824,6 +825,9 @@ dcc_build_somewhere(char *argv[],
 
         if ((ret = dcc_strip_local_args(argv, &server_side_argv)))
             goto fallback;
+
+	if (dist_lto)
+	  cpp_fname = input_fname;
 
     } else {
         char *dotd_target = NULL;

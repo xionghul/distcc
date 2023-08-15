@@ -268,6 +268,8 @@ int dcc_is_source(const char *sfile)
     case 'S':
         return !strcmp(ext, "S");
 #endif
+    case 'o':
+	return strstr (sfile, ".ltrans") && !strstr (sfile, ".ltrans.");
     default:
         return 0;
     }

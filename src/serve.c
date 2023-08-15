@@ -705,9 +705,10 @@ static int dcc_run_job(int in_fd,
         changed_directory = 1;
     }
 
+    int dist_lto = 0;
     if ((ret = dcc_r_argv(in_fd, "ARGC", "ARGV", &argv))
         || (ret = dcc_scan_args(argv, &orig_input_tmp, &orig_output_tmp,
-                                &tweaked_argv)))
+                                &tweaked_argv, &dist_lto)))
         goto out_cleanup;
 
     /* The orig_input_tmp and orig_output_tmp values returned by dcc_scan_args()

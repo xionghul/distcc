@@ -128,12 +128,13 @@ static void dcc_note_compiled(const char *input_file, const char *output_file)
  * @returns 0 if it's ok to distribute this compilation, or an error code.
  **/
 int dcc_scan_args(char *argv[], char **input_file, char **output_file,
-                  char ***ret_newargv)
+                  char ***ret_newargv, int *dist_lto)
 {
     int seen_opt_c = 0, seen_opt_s = 0;
     int i;
     char *a;
     int ret;
+    int seen_dist_lto = 0;
 
      /* allow for -o foo.o */
     if ((ret = dcc_copy_argv(argv, ret_newargv, 4)) != 0)
@@ -216,16 +217,26 @@ int dcc_scan_args(char *argv[], char **input_file, char **output_file,
             } else if (!strcmp(a, "-frepo")) {
                 rs_log_info("compiler will emit .rpo files; must be local");
                 return EXIT_DISTCC_FAILED;
-            } else if (str_startswith("-x", a)
+            } else if ((str_startswith("-x", a)
                        && argv[i+1]
                        && !str_startswith("c", argv[i+1])
                        && !str_startswith("c++", argv[i+1])
                        && !str_startswith("objective-c", argv[i+1])
                        && !str_startswith("objective-c++", argv[i+1])
-                       && !str_startswith("go", argv[i+1])
+                       && !str_startswith("go", argv[i+1]))
                        ) {
-                rs_log_info("gcc's -x handling is complex; running locally for %s", argv[i+1] ? argv[i+1] : "empty");
-                return EXIT_DISTCC_FAILED;
+		if (str_startswith("-xlto", a)
+		    && argv[i+1]
+		    && str_startswith("-c", argv[i+1]))
+		  {
+		    *dist_lto = seen_dist_lto = 1;
+		    continue;
+		  }
+		else
+		  {
+		    rs_log_info("gcc's -x handling is complex; running locally for %s", argv[i+1] ? argv[i+1] : "empty");
+		    return EXIT_DISTCC_FAILED;
+		  }
             } else if (str_startswith("-dr", a)) {
                 rs_log_info("gcc's debug option %s may write extra files; "
                             "running locally", a);
@@ -251,11 +262,12 @@ int dcc_scan_args(char *argv[], char **input_file, char **output_file,
             } else if (str_endswith(".o", a)) {
               GOT_OUTPUT:
                 rs_trace("found object/output file \"%s\"", a);
-                if (*output_file) {
+                if (*output_file && !seen_dist_lto) {
                     rs_log_info("called for link?  i give up");
                     return EXIT_DISTCC_FAILED;
                 }
-                *output_file = a;
+		if (!*output_file)
+		  *output_file = a;
             }
         }
     }

@@ -252,7 +252,8 @@ int dcc_get_dotd_info(char **argv, char **dotd_fname,
 
         char *extension;
         char *tmp_dotd_fname;
-        dcc_scan_args(argv, &input_file, &output_file, &new_args);
+	int dist_lto = 0;
+        dcc_scan_args(argv, &input_file, &output_file, &new_args, &dist_lto);
         /* if .o is set, just append .d.
          * otherwise, take the basename of the input, and set the suffix to .d */
         if (has_dash_o)
