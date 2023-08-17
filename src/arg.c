@@ -205,6 +205,7 @@ int dcc_scan_args(char *argv[], char **input_file, char **output_file,
                 return EXIT_DISTCC_FAILED;
             } else if (!strcmp(a, "-S")) {
                 seen_opt_s = 1;
+#if 0
             } else if (!strcmp(a, "-fprofile-arcs")
                        || !strcmp(a, "-ftest-coverage")
 		       || !strcmp(a, "--coverage")
@@ -214,6 +215,7 @@ int dcc_scan_args(char *argv[], char **input_file, char **output_file,
 		       || !strcmp(a, "-fprofile-correction")) {
                 rs_log_info("compiler will emit/use profile info; must be local");
                 return EXIT_DISTCC_FAILED;
+#endif
             } else if (!strcmp(a, "-frepo")) {
                 rs_log_info("compiler will emit .rpo files; must be local");
                 return EXIT_DISTCC_FAILED;

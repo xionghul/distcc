@@ -46,12 +46,13 @@
  * recursively invoking itself, thinking it's the real compiler.
  **/
 
-static const char dcc_safeguard_name[] = "_DISTCC_SAFEGUARD";
+//static const char dcc_safeguard_name[] = "_DISTCC_SAFEGUARD";
 static char dcc_safeguard_set[] = "_DISTCC_SAFEGUARD=1";
 static int dcc_safeguard_level;
 
 int dcc_recursion_safeguard(void)
 {
+#if 0
     char *env = getenv(dcc_safeguard_name);
 
     if (env) {
@@ -62,6 +63,7 @@ int dcc_recursion_safeguard(void)
     else
         dcc_safeguard_level = 0;
     rs_trace("safeguard level=%d", dcc_safeguard_level);
+#endif
 
     return dcc_safeguard_level;
 }
@@ -69,8 +71,8 @@ int dcc_recursion_safeguard(void)
 
 int dcc_increment_safeguard(void)
 {
-    if (dcc_safeguard_level > 0)
-    dcc_safeguard_set[sizeof dcc_safeguard_set-2] = dcc_safeguard_level+'1';
+    //if (dcc_safeguard_level > 0)
+    //dcc_safeguard_set[sizeof dcc_safeguard_set-2] = dcc_safeguard_level+'1';
     rs_trace("setting safeguard: %s", dcc_safeguard_set);
     if ((putenv(strdup(dcc_safeguard_set)) == -1)) {
         rs_log_error("putenv failed");

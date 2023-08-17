@@ -343,8 +343,8 @@ int main(int argc, char **argv)
         }
     }
 
-    if (sg_level - tweaked_path > 0) {
-        rs_log_crit("distcc seems to have invoked itself recursively!");
+    if (sg_level - tweaked_path > 1) {
+        rs_log_crit("distcc seems to have invoked itself recursively! sg:%d, tw:%d ", sg_level, tweaked_path);
         ret = EXIT_RECURSION;
         goto out;
     }
