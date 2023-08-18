@@ -1,0 +1,28 @@
+version: v2.0
+name: distcc代码质量扫描
+on:
+  push:
+  - master
+  tag:
+  - '*'
+  mr:
+  - master
+resources:
+  repositories:
+  - repository: APD_Quality/TCoder_service
+    name: tcoder
+    ref: master
+extends:
+  template: pipelines/codecc.yml@tcoder
+  parameters:
+    languages:
+    - C_CPP
+    script: |-
+      echo "skip build"
+    gatekeepers:
+    - tegkunzhang
+    receivers:
+    - ${{ ci.actor }}
+    image: mirrors.tencent.com/ci/tlinux3_ci:2.3.0
+    enableSubmodule: false
+    gateTemplate: gates/codecc.yml
