@@ -96,7 +96,7 @@ struct dcc_hostdef _dcc_local = {
     0,
     NULL,
     1,                          /* host is_up */
-    4,                          /* number of tasks */
+    32,                          /* number of tasks */
     (char *)"localhost",        /* verbatim string */
     DCC_VER_1,                  /* protocol (ignored) */
     DCC_COMPRESS_NONE,          /* compression (ignored) */
@@ -117,7 +117,7 @@ struct dcc_hostdef _dcc_local_cpp = {
     0,
     NULL,
     1,                          /* host is_up */
-    8,                          /* number of tasks */
+    32,                          /* number of tasks */
     (char *)"localhost",        /* verbatim string */
     DCC_VER_1,                  /* protocol (ignored) */
     DCC_COMPRESS_NONE,          /* compression (ignored) */

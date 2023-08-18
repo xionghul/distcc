@@ -715,7 +715,8 @@ dcc_build_somewhere(char *argv[],
         goto clean_up;
 
     if (sg_level) /* Recursive distcc - run locally, and skip all locking. */
-        goto run_local;
+      rs_log_warning("sg_level:%d\n", sg_level);
+       // goto run_local;
 
     /* TODO: Perhaps tidy up these gotos. */
 
@@ -724,6 +725,7 @@ dcc_build_somewhere(char *argv[],
     ret = dcc_scan_args(argv, &input_fname, &output_fname, &new_argv, &dist_lto);
     dcc_free_argv(argv);
     argv = new_argv;
+
     if (!getenv("DISTCC_NO_REWRITE_CROSS")) {
 #ifdef HAVE_FSTATAT
         dcc_rewrite_generic_compiler(new_argv);
@@ -771,7 +773,7 @@ dcc_build_somewhere(char *argv[],
         goto run_local;
     }
 
-    if (!dcc_is_preprocessed(input_fname)) {
+    if (!dcc_is_preprocessed(input_fname) && !dist_lto) {
         /* Lock the local CPU, since we're going to be doing preprocessing
          * or include scanning. */
         if ((ret = dcc_lock_local_cpp(&local_cpu_lock_fd)) != 0) {
@@ -817,7 +819,7 @@ dcc_build_somewhere(char *argv[],
 
     }
 
-    if (host->cpp_where == DCC_CPP_ON_CLIENT) {
+    if (host->cpp_where == DCC_CPP_ON_CLIENT && !dist_lto) {
         files = NULL;
 
         if ((ret = dcc_cpp_maybe(argv, input_fname, &cpp_fname, &cpp_pid) != 0))
@@ -825,9 +827,6 @@ dcc_build_somewhere(char *argv[],
 
         if ((ret = dcc_strip_local_args(argv, &server_side_argv)))
             goto fallback;
-
-	if (dist_lto)
-	  cpp_fname = input_fname;
 
     } else {
         char *dotd_target = NULL;
@@ -846,6 +845,10 @@ dcc_build_somewhere(char *argv[],
                dcc_argv_append(server_side_argv, strdup(dotd_target));
         }
     }
+
+    if (dist_lto)
+      cpp_fname = input_fname;
+
     if ((ret = dcc_compile_remote(server_side_argv,
                                   input_fname,
                                   cpp_fname,
