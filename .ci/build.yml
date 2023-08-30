@@ -1,0 +1,78 @@
+version: v2.0
+name: build distcc
+on:
+  push:
+  - master
+  tag:
+  - '*'
+  mr:
+  - master
+  
+variables:
+  DEPLOY_TYPE: release
+
+stages:
+  - name: build
+    jobs:
+      build-package:
+        name: compile & build
+        runs-on:
+          pool-name: docker
+          container:
+            image: mirrors.tencent.com/tencent_compiler/${{ matrix.os }}_ci:latest
+        strategy:
+          matrix:
+            os: [tlinux2]
+            dist: [local]
+            config: [release]
+        steps:
+          - checkout: self
+            name: checkout source branch
+            with:
+              localPath: "src"
+
+          - name: install dependency
+            run: |
+              yum install -y python3-devel.x86_64
+
+          - name: Build
+            run: |
+              set -x -e
+              cd ${WORKSPACE}/src
+              DISTCC_COMMIT_ID="$(git log -n 1 --pretty=format:"%h" )"
+
+              PLATFORM_NAME="linux-gnu-${{ matrix.os }}"
+              CPU_ARCH="x86_64"
+              CONFIG_SUFFIX="${{ matrix.config }}"
+              OUTPUT=distcc-${CPU_ARCH}-${PLATFORM_NAME}-${CONFIG_SUFFIX}
+
+              ./autogen.sh
+              ./configure
+              make -j 16
+
+              mkdir -p /tmp/distcc
+              cp distcc distccd lsdistcc /tmp/distcc/
+              tar -cJf distcc.tar.xz /tmp/distcc
+              rm -rf /tmp/distcc
+             
+              release_path=distcc-${DISTCC_COMMIT_ID}
+              echo ::set-variable name=release_path::${release_path}
+              mkdir -p ${WORKSPACE}/out/${release_path}
+              mv *.tar.xz ${WORKSPACE}/out/${release_path}/
+
+
+          - name: "归档构件"
+            uses: "UploadArtifactory@5.*"
+            if: ci.event  == push
+            with:
+              filePath: "out/${{variables.release_path}}/*.tar.xz"
+              repoName: "custom"
+              destPath: "./distcc-releases/${{variables.release_path}}"
+              downloadFiles: "[{\"path\":\"\",\"param\":\"\"}]"
+              metadata: "[{\"key\":\"\",\"value\":\"\"}]"
+              enableIncrementalUpload: false
+              enableMD5Checksum: true
+              enableScan: false
+
+notices:
+  - type: wework-message
