@@ -20,7 +20,7 @@ extends:
     script: |-
       echo "skip build"
     gatekeepers:
-    - tegkunzhang
+    - metrechen
     receivers:
     - ${{ ci.actor }}
     image: mirrors.tencent.com/ci/tlinux3_ci:2.3.0
