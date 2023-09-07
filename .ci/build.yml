@@ -51,7 +51,7 @@ stages:
               make -j 16
 
               mkdir -p /tmp/distcc
-              cp distcc distccd lsdistcc /tmp/distcc/
+              cp distcc distccd lsdistcc distccmon-text /tmp/distcc/
               tar -cJf distcc.tar.xz /tmp/distcc
               rm -rf /tmp/distcc
              
