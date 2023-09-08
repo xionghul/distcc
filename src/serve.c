@@ -649,6 +649,7 @@ static int dcc_run_job(int in_fd,
     char **tweaked_argv = NULL;
     int status = 0;
     char *temp_i = NULL, *temp_o = NULL;
+    char *temp_gcda = NULL;
     char *err_fname = NULL, *out_fname = NULL, *deps_fname = NULL;
     char *temp_dir = NULL; /* for receiving multiple files */
     int ret = 0, compile_ret = 0;
@@ -752,6 +753,57 @@ static int dcc_run_job(int in_fd,
             || (ret = dcc_set_input(argv, temp_i))
             || (ret = dcc_set_output(argv, temp_o)))
             goto out_cleanup;
+
+	int profile_use_gcda = 0;
+	char * profile_use_path = NULL;
+	char * a;
+	if (!dist_lto)
+	  for (int i = 0; (a = argv[i]); i++) {
+	    if (a[0] == '-') {
+	      if (!strncmp(a, "-fprofile-use", 13))
+		profile_use_gcda = 1;
+	      if (!strncmp(a, "-fprofile-use=", 14))
+		{
+		  size_t len = strlen(a) - 14 + 1;
+		  profile_use_path = malloc (len);
+		  memset ( profile_use_path, 0, len);
+		  strncpy(profile_use_path, a+14, len);
+		  rs_trace("profile_use_path: %s", profile_use_path);
+		  memset (argv[i], 0, strlen(a));
+		  if (profile_use_path[0] == '/')
+		    strncpy(argv[i], "-fprofile-use", 13);
+		  else
+		    strncpy(argv[i], "-fprofile-use=./", 15);
+		  rs_trace("argv[i]: %s", argv[i]);
+		}
+	    }
+	  }
+
+	if (profile_use_gcda)
+	  {
+	    const char * dot = dcc_find_extension_const(temp_o);
+	    size_t len = strlen(temp_o) - strlen(dot) + strlen(".gcda") + 1;
+	    if (profile_use_path)
+	      len += strlen (profile_use_path);
+	    temp_gcda = malloc (len);
+	    memset (temp_gcda, 0, len);
+
+	    if (profile_use_path && profile_use_path[0] != '/')
+	      strncpy (temp_gcda, profile_use_path, strlen(profile_use_path));
+
+	    strncat(temp_gcda, temp_o, strlen(temp_o) - strlen(dot));
+	    strcat(temp_gcda, ".gcda");
+	    rs_trace("temp_gcda: %s", temp_gcda);
+
+	    if ((ret = dcc_add_cleanup(temp_gcda))) {
+		/* bailing out */
+		unlink(temp_gcda);
+		goto out_cleanup;
+	    }
+
+	    if ((ret = dcc_r_token_file(in_fd, "DOTI", temp_gcda, compr)))
+	      goto out_cleanup;
+	  }
     }
 
     if (!dcc_remap_compiler(&argv[0]))
@@ -913,6 +965,7 @@ out_cleanup:
     free(temp_dir);
     free(temp_i);
     free(temp_o);
+    free(temp_gcda);
 
     free(deps_fname);
     free(err_fname);

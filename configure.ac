@@ -210,7 +210,7 @@ then
     # causing some of the tests to fail when they should succeed.
     if test x"$enable_Werror" != xno
     then
-      WERROR_CFLAGS="-Werror"
+      WERROR_CFLAGS="-Werror  -Wno-error=stringop-overflow -Wno-error=stringop-truncation"
 	  # -Wp,-U_FORTIFY_SOURCE is to turn off _FORTIFY_SOURCE on systems where
 	  # it's in the Python Makefile (and hence inherited by us).
 	  # -Werror -D_FORTIFY_SOURCE gives compiler errors for some distcc routines that

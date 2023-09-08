@@ -34,6 +34,7 @@
 #include <string.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <limits.h>
 
 #include <sys/types.h>
 #include <sys/time.h>
@@ -149,6 +150,49 @@ dcc_send_header(int net_fd,
     return 0;
 }
 
+static char *
+mangle_path (char const *base)
+{
+  /* Convert '/' to '#', convert '..' to '^'.  */
+  const char *probe;
+  char *buffer = (char *)malloc (strlen (base) + 1);
+  char *ptr = buffer;
+
+  for (; *base; base = probe)
+    {
+      size_t len;
+
+      for (probe = base; *probe; probe++)
+	if (*probe == '/')
+	  break;
+      len = probe - base;
+      if (len == 2 && base[0] == '.' && base[1] == '.')
+	*ptr++ = '^';
+      else
+	{
+	  memcpy (ptr, base, len);
+	  ptr += len;
+	}
+      if (*probe)
+	{
+	  *ptr++ = '#';
+	  probe++;
+	}
+    }
+
+  /* Terminate the string.  */
+  *ptr = '\0';
+
+  return buffer;
+}
+
+static int max (int a, int b) {
+    if (a>b)
+      return a;
+    else
+      return b;
+}
+
 
 /**
  * Pass a compilation across the network.
@@ -202,6 +246,7 @@ int dcc_compile_remote(char **argv,
                        pid_t cpp_pid,
                        int local_cpu_lock_fd,
                        struct dcc_hostdef *host,
+		       int dist_lto,
                        int *status)
 {
     int to_net_fd = -1, from_net_fd = -1;
@@ -209,8 +254,13 @@ int dcc_compile_remote(char **argv,
     pid_t ssh_pid = 0;
     int ssh_status;
     off_t doti_size;
+    off_t doti_gcda_size;
     struct timeval before, after;
     unsigned int n_files;
+    char *gcda_fname = NULL;
+    char *gcda_tmp_fname = NULL;
+    char *mangle_filename = NULL;
+    char *profile_use_path = NULL;
 
     if (gettimeofday(&before, NULL))
         rs_log_warning("gettimeofday failed");
@@ -279,6 +329,136 @@ int dcc_compile_remote(char **argv,
         if ((ret = dcc_x_file(to_net_fd, cpp_fname, "DOTI", host->compr,
                               &doti_size)))
             goto out;
+
+	char * a;
+	int profile_use_gcda = 0;
+	if (!dist_lto)
+	  for (int i = 0; (a = argv[i]); i++) {
+	    if (a[0] == '-') {
+	      if (!strncmp(a, "-fprofile-use", 13))
+		profile_use_gcda = 1;
+	      if (!strncmp(a, "-fprofile-use=", 14))
+		{
+		  size_t len = strlen(a) - 14 + 1;
+		  profile_use_path = malloc (len);
+		  memset ( profile_use_path, 0, len);
+		  strncpy(profile_use_path, a+14, len);
+		  rs_trace("profile_use_path: %s", profile_use_path);
+		}
+	    }
+	  }
+
+        if (profile_use_gcda && output_fname)
+	{
+	   const char *tempdir;
+	   if ((ret = dcc_get_tmp_top(&tempdir)))
+	     return ret;
+
+	   if (access(tempdir, W_OK|X_OK) == -1) {
+	     rs_log_error("can't use TMPDIR \"%s\": %s", tempdir, strerror(errno));
+	     return EXIT_IO_ERROR;
+	   }
+
+	    char cwd[PATH_MAX];
+	    getcwd(cwd, sizeof(cwd));
+	   const char *dot = dcc_find_extension_const(output_fname);
+	   int dot_len = 0;
+	   if (dot)
+	     dot_len = strlen(dot);
+	   int cwd_len = strlen(cwd);
+	   int profile_use_len = 0;
+	   if (profile_use_path)
+	     profile_use_len = strlen(profile_use_path);
+           size_t gcda_len = max(profile_use_len, cwd_len) +
+                             strlen(output_fname) - dot_len +
+                             strlen(".gcda") + 2;
+           if (profile_use_path)
+	     gcda_len += profile_use_len;
+	   gcda_fname = malloc (gcda_len);
+	   memset(gcda_fname, 0, gcda_len);
+	   if (profile_use_path)
+	     {
+	       if (output_fname[0] != '/')
+		 {
+		   strcpy(gcda_fname, profile_use_path);
+		   strcat(gcda_fname, "/");
+		   mangle_filename = mangle_path (cwd);
+		   strncat(gcda_fname, mangle_filename, strlen(mangle_filename));
+		   strcat(gcda_fname, "#");
+		 }
+	       char *mangle_output = mangle_path (output_fname);
+	       strncat(gcda_fname, mangle_output, strlen(mangle_output)- dot_len);
+	       free(mangle_output);
+	     }
+	   else
+	     {
+	       if (output_fname[0] != '/')
+		 {
+		   strcpy(gcda_fname, cwd);
+		   strcat(gcda_fname, "/");
+		 }
+	     strncat(gcda_fname, output_fname, strlen(output_fname)- dot_len);
+	     }
+	   strcat (gcda_fname, ".gcda");
+	   rs_trace("gcda_fname:%s", gcda_fname);
+
+	   int fd;
+	   const char * dot2 = dcc_find_extension_const(cpp_fname);
+	   size_t temp_len = strlen(cpp_fname) - strlen(dot2) + strlen(".gcda") + 1;
+	   gcda_tmp_fname = malloc (temp_len);
+	   memset(gcda_tmp_fname, 0, temp_len);
+
+	   strncpy(gcda_tmp_fname, cpp_fname, strlen(cpp_fname) - strlen(dot2));
+	   strcat (gcda_tmp_fname, ".gcda");
+	   rs_trace("gcda_tmp_fname:%s", gcda_tmp_fname);
+
+	   do {
+	     int fd_src = open(gcda_fname, O_RDONLY, 0600);
+	     if (fd_src == -1) {
+	       rs_trace("gcda file doesn't exist %s: %s", gcda_fname, strerror(errno));
+	       goto out;
+	     }
+
+	     fd = open(gcda_tmp_fname, O_WRONLY | O_CREAT | O_EXCL, 0600);
+	     if (fd == -1) {
+	       /* try again */
+	       rs_trace("failed to create %s: %s", gcda_tmp_fname, strerror(errno));
+	       continue;
+	     }
+
+	     char buff[1024];
+	     int len;
+             while ((len = read(fd_src, buff, 1024)) != 0)
+	     {
+	       if (len == -1)
+		 goto out;
+               write(fd, buff, len);
+             }
+
+             if (close(fd) == -1) {  /* huh? */
+	       rs_log_warning("failed to close %s: %s", gcda_tmp_fname, strerror(errno));
+	       return EXIT_IO_ERROR;
+	     }
+
+	     if (close(fd_src) == -1) {  /* huh? */
+	       rs_log_warning("failed to close %s: %s", gcda_fname, strerror(errno));
+	       return EXIT_IO_ERROR;
+	     }
+
+	     break;
+	   } while (1);
+
+	   if ((ret = dcc_add_cleanup(gcda_tmp_fname))) {
+	     /* bailing out */
+	     unlink(gcda_tmp_fname);
+	     goto out;
+	   }
+
+
+	  if ((ret = dcc_x_file(to_net_fd, gcda_tmp_fname, "DOTI", host->compr,
+		  &doti_gcda_size)))
+	    goto out;
+	}
     }
 
     rs_trace("client finished sending request to server");
@@ -333,6 +513,18 @@ int dcc_compile_remote(char **argv,
     if (ssh_pid) {
         dcc_collect_child("ssh", ssh_pid, &ssh_status, timeout_null_fd); /* ignore failure */
     }
+
+    if (gcda_fname)
+      free (gcda_fname);
+
+    if (gcda_tmp_fname)
+      free (gcda_tmp_fname);
+
+    if (mangle_filename)
+      free (mangle_filename);
+
+    if (profile_use_path)
+      free (profile_use_path);
 
     return ret;
 }
