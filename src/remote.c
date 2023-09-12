@@ -198,7 +198,6 @@ static int max (int a, int b) {
       return b;
 }
 
-
 /**
  * Pass a compilation across the network.
  *
@@ -266,6 +265,8 @@ int dcc_compile_remote(char **argv,
     char *gcda_tmp_fname = NULL;
     char *mangle_filename = NULL;
     char *profile_use_path = NULL;
+    int profile_use_gcda = 0;
+    int gcda_exist = 0;
 
     if (gettimeofday(&before, NULL))
         rs_log_warning("gettimeofday failed");
@@ -336,7 +337,6 @@ int dcc_compile_remote(char **argv,
             goto out;
 
 	char * a;
-	int profile_use_gcda = 0;
 	if (!dist_lto)
 	  for (int i = 0; (a = argv[i]); i++) {
 	    if (a[0] == '-') {
@@ -423,7 +423,7 @@ int dcc_compile_remote(char **argv,
 	     int fd_src = open(gcda_fname, O_RDONLY, 0600);
 	     if (fd_src == -1) {
 	       rs_trace("gcda file doesn't exist %s: %s", gcda_fname, strerror(errno));
-	       goto out;
+	       goto gcda_early_out;
 	     }
 
 	     fd = open(gcda_tmp_fname, O_WRONLY | O_CREAT | O_EXCL, 0600);
@@ -438,18 +438,18 @@ int dcc_compile_remote(char **argv,
              while ((len = read(fd_src, buff, 1024)) != 0)
 	     {
 	       if (len == -1)
-		 goto out;
+		 goto gcda_early_out;
                write(fd, buff, len);
              }
 
              if (close(fd) == -1) {  /* huh? */
 	       rs_log_warning("failed to close %s: %s", gcda_tmp_fname, strerror(errno));
-	       return EXIT_IO_ERROR;
+	       goto gcda_early_out;
 	     }
 
 	     if (close(fd_src) == -1) {  /* huh? */
 	       rs_log_warning("failed to close %s: %s", gcda_fname, strerror(errno));
-	       return EXIT_IO_ERROR;
+	       goto gcda_early_out;
 	     }
 
 	     break;
@@ -458,14 +458,25 @@ int dcc_compile_remote(char **argv,
 	   if ((ret = dcc_add_cleanup(gcda_tmp_fname))) {
 	     /* bailing out */
 	     unlink(gcda_tmp_fname);
-	     goto out;
+	     goto gcda_early_out;
 	   }
 
+	   gcda_exist = 1;
+           if ((ret = dcc_x_token_int(to_net_fd, "GCDA", gcda_exist)) != 0) {
+             rs_trace("fail to send token %s", strerror(errno));
+             goto out;
+           }
 
-	  if ((ret = dcc_x_file(to_net_fd, gcda_tmp_fname, "DOTI", host->compr,
+          if ((ret = dcc_x_file(to_net_fd, gcda_tmp_fname, "DOTI", host->compr,
 		  &doti_gcda_size)))
 	    goto out;
 	}
+    }
+
+gcda_early_out:
+    if (profile_use_gcda && !gcda_exist) {
+	if ((ret = dcc_x_token_int(to_net_fd, "GCDA", 0)) != 0)
+	  rs_trace("fail to send token %s", strerror(errno));
     }
 
     rs_trace("client finished sending request to server");

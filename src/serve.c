@@ -779,34 +779,43 @@ static int dcc_run_job(int in_fd,
 	    }
 	  }
 
+	unsigned gcda_exist = 0;
 	if (profile_use_gcda)
 	  {
-	    const char * dot = dcc_find_extension_const(temp_o);
-	    size_t len = strlen(temp_o) - strlen(dot) + strlen(".gcda") + 1;
-	    if (profile_use_path)
-	      len += strlen (profile_use_path);
-	    temp_gcda = malloc (len);
-	    memset (temp_gcda, 0, len);
-
-	    if (profile_use_path && profile_use_path[0] != '/')
-	      strncpy (temp_gcda, profile_use_path, strlen(profile_use_path));
-
-	    strncat(temp_gcda, temp_o, strlen(temp_o) - strlen(dot));
-	    strcat(temp_gcda, ".gcda");
-	    if (profile_use_path)
-	      free (profile_use_path);
-
-	    rs_trace("temp_gcda: %s", temp_gcda);
-
-	    if ((ret = dcc_add_cleanup(temp_gcda))) {
-		/* bailing out */
-		unlink(temp_gcda);
-		goto out_cleanup;
-	    }
-
-	    if ((ret = dcc_r_token_file(in_fd, "DOTI", temp_gcda, compr)))
+	    if ((ret = dcc_r_token_int(in_fd, "GCDA", &gcda_exist)) != 0) {
+	      rs_trace("fail to send token %s", strerror(errno));
 	      goto out_cleanup;
+	    }
 	  }
+
+	if (gcda_exist)
+	{
+	  const char * dot = dcc_find_extension_const(temp_o);
+	  size_t len = strlen(temp_o) - strlen(dot) + strlen(".gcda") + 1;
+	  if (profile_use_path)
+	    len += strlen (profile_use_path);
+	  temp_gcda = malloc (len);
+	  memset (temp_gcda, 0, len);
+
+	  if (profile_use_path && profile_use_path[0] != '/')
+	    strncpy (temp_gcda, profile_use_path, strlen(profile_use_path));
+
+	  strncat(temp_gcda, temp_o, strlen(temp_o) - strlen(dot));
+	  strcat(temp_gcda, ".gcda");
+	  if (profile_use_path)
+	    free (profile_use_path);
+
+	  rs_trace("temp_gcda: %s", temp_gcda);
+
+	  if ((ret = dcc_add_cleanup(temp_gcda))) {
+	    /* bailing out */
+	    unlink(temp_gcda);
+	    goto out_cleanup;
+	  }
+
+	  if ((ret = dcc_r_token_file(in_fd, "DOTI", temp_gcda, compr)))
+	    goto out_cleanup;
+	}
     }
 
     if (!dcc_remap_compiler(&argv[0]))
