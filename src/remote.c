@@ -168,6 +168,11 @@ mangle_path (char const *base)
       len = probe - base;
       if (len == 2 && base[0] == '.' && base[1] == '.')
 	*ptr++ = '^';
+      else if (len == 1 && base[0] == '.' && base[1] == '/')
+	{
+	  probe++;
+	  continue;
+	}
       else
 	{
 	  memcpy (ptr, base, len);
@@ -362,6 +367,8 @@ int dcc_compile_remote(char **argv,
 	    char cwd[PATH_MAX];
 	    getcwd(cwd, sizeof(cwd));
 	   const char *dot = dcc_find_extension_const(output_fname);
+	   rs_trace("output_fname:%s", output_fname);
+	   rs_trace("cwd:%s", cwd);
 	   int dot_len = 0;
 	   if (dot)
 	     dot_len = strlen(dot);
