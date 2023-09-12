@@ -793,6 +793,9 @@ static int dcc_run_job(int in_fd,
 
 	    strncat(temp_gcda, temp_o, strlen(temp_o) - strlen(dot));
 	    strcat(temp_gcda, ".gcda");
+	    if (profile_use_path)
+	      free (profile_use_path);
+
 	    rs_trace("temp_gcda: %s", temp_gcda);
 
 	    if ((ret = dcc_add_cleanup(temp_gcda))) {
