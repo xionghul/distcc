@@ -128,16 +128,19 @@ static void dcc_note_compiled(const char *input_file, const char *output_file)
  * @returns 0 if it's ok to distribute this compilation, or an error code.
  **/
 int dcc_scan_args(char *argv[], char **input_file, char **output_file,
-                  char ***ret_newargv, int *dist_lto)
+                  char ***ret_newargv, int *dist_lto, int *dist_pgen)
 {
     int seen_opt_c = 0, seen_opt_s = 0;
     int i;
     char *a;
     int ret;
     int seen_dist_lto = 0;
+    int seen_profile_generate = 0;
+    int seen_working_directories = 0;
+    *dist_pgen = 0;
 
      /* allow for -o foo.o */
-    if ((ret = dcc_copy_argv(argv, ret_newargv, 4)) != 0)
+    if ((ret = dcc_copy_argv(argv, ret_newargv, 5)) != 0)
         return ret;
     argv = *ret_newargv;
 
@@ -203,20 +206,24 @@ int dcc_scan_args(char *argv[], char **input_file, char **output_file,
             } else if (str_startswith("-specs=", a)) {
                 rs_trace("%s must be local", a);
                 return EXIT_DISTCC_FAILED;
-            } else if (!strcmp(a, "-S")) {
+            } else if (!strcmp(a, "-S"))
                 seen_opt_s = 1;
+            else if (!strncmp(a, "-fworking-directory", 19))
+              seen_working_directories = 1;
+            else if (!strncmp(a, "-fprofile-generate", 18))
+              seen_profile_generate = 1;
 #if 0
-            } else if (!strcmp(a, "-fprofile-arcs")
+            else if (!strcmp(a, "-fprofile-arcs")
                        || !strcmp(a, "-ftest-coverage")
-		       || !strcmp(a, "--coverage")
-		       || !strncmp(a, "-fprofile-generate", 18) /* it also has an -fprofile-generate=<path> form */
-		       || !strncmp(a, "-fprofile-use", 13)
-		       || !strncmp(a, "-fauto-profile", 14)
-		       || !strcmp(a, "-fprofile-correction")) {
+                       || !strcmp(a, "--coverage")
+                       || !strncmp(a, "-fprofile-generate", 18) /* it also has an -fprofile-generate=<path> form */
+                       || !strncmp(a, "-fprofile-use", 13)
+                       || !strncmp(a, "-fauto-profile", 14)
+                       || !strcmp(a, "-fprofile-correction"))
                 rs_log_info("compiler will emit/use profile info; must be local");
                 return EXIT_DISTCC_FAILED;
 #endif
-            } else if (!strcmp(a, "-frepo")) {
+            else if (!strcmp(a, "-frepo")) {
                 rs_log_info("compiler will emit .rpo files; must be local");
                 return EXIT_DISTCC_FAILED;
             } else if ((str_startswith("-x", a)
@@ -227,18 +234,18 @@ int dcc_scan_args(char *argv[], char **input_file, char **output_file,
                        && !str_startswith("objective-c++", argv[i+1])
                        && !str_startswith("go", argv[i+1]))
                        ) {
-		if (str_startswith("-xlto", a)
-		    && argv[i+1]
-		    && str_startswith("-c", argv[i+1]))
-		  {
-		    *dist_lto = seen_dist_lto = 1;
-		    continue;
-		  }
-		else
-		  {
-		    rs_log_info("gcc's -x handling is complex; running locally for %s", argv[i+1] ? argv[i+1] : "empty");
-		    return EXIT_DISTCC_FAILED;
-		  }
+              if (str_startswith("-xlto", a)
+                  && argv[i+1]
+                  && str_startswith("-c", argv[i+1]))
+              {
+                *dist_lto = seen_dist_lto = 1;
+                continue;
+              }
+              else
+              {
+                rs_log_info("gcc's -x handling is complex; running locally for %s", argv[i+1] ? argv[i+1] : "empty");
+                return EXIT_DISTCC_FAILED;
+              }
             } else if (str_startswith("-dr", a)) {
                 rs_log_info("gcc's debug option %s may write extra files; "
                             "running locally", a);
@@ -268,8 +275,8 @@ int dcc_scan_args(char *argv[], char **input_file, char **output_file,
                     rs_log_info("called for link?  i give up");
                     return EXIT_DISTCC_FAILED;
                 }
-		if (!*output_file)
-		  *output_file = a;
+                if (!*output_file)
+                  *output_file = a;
             }
         }
     }
@@ -319,6 +326,23 @@ int dcc_scan_args(char *argv[], char **input_file, char **output_file,
         dcc_argv_append(argv, strdup("-o"));
         dcc_argv_append(argv, ofile);
         *output_file = ofile;
+    }
+
+    if (seen_profile_generate && seen_working_directories)
+    {
+      char cwd[MAXPATHLEN + 1];
+      char * temp_random_dir = getcwd(cwd, MAXPATHLEN);
+      char * profile_prefix_path;
+      if (asprintf(&profile_prefix_path, "%s%s", "-fprofile-prefix-path=", temp_random_dir) == -1)
+        return EXIT_DISTCC_FAILED;
+      rs_trace("profile_prefix_path:%s", profile_prefix_path);
+      dcc_argv_append(argv, profile_prefix_path);
+      *dist_pgen = 1;
+    }
+    else if (seen_profile_generate && !seen_working_directories)
+    {
+      rs_log_info("profile-generate need -fworking-directory to produce correct gcda path!");
+      return EXIT_DISTCC_FAILED;
     }
 
     dcc_note_compiled(*input_file, *output_file);

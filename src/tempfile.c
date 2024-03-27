@@ -43,6 +43,7 @@
 #include <string.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <libgen.h>
 
 #include "distcc.h"
 #include "trace.h"
@@ -450,4 +451,118 @@ int dcc_make_tmpnam(const char *prefix,
 
     *name_ret = s;
     return 0;
+}
+
+static int dcc_make_dirs(char *dir)
+{
+  int ret = 0;
+  if(NULL == dir || '\0' == *dir)
+    return EXIT_IO_ERROR;
+
+  char *p = strrchr(dir, '/');
+
+  if(p != NULL)
+  {
+    char parent_dir[4096] = { 0 };
+    strncpy(parent_dir, dir, p - dir);
+    if(access(parent_dir, F_OK) != 0)
+      dcc_make_dirs(parent_dir);
+  }
+
+  if(access(dir, F_OK) != 0)
+  {
+    if( mkdir(dir, 0777) != 0)
+      return EXIT_IO_ERROR;
+    if ((ret = dcc_add_cleanup(dir))) {
+      /* bailing out */
+      rmdir(dir);
+      return ret;
+    }
+  }
+
+  return 0;
+}
+
+int dcc_make_tmp_dir_obj(const char *orig_output,
+                         char **name_ret)
+{
+    char *s = NULL;
+    int ret;
+    int fd;
+    char cwd[MAXPATHLEN + 1];
+    char * temp_random_dir;
+    temp_random_dir = getcwd(cwd, MAXPATHLEN);
+
+    if (asprintf(&s, "%s/%s", temp_random_dir, orig_output) == -1)
+      return EXIT_OUT_OF_MEMORY;
+
+    fd = open(s, O_WRONLY | O_CREAT | O_EXCL, 0600);
+
+    if (fd == -1) {
+      char *path = strdup(s);
+      ret = dcc_make_dirs (dirname(path));
+
+      free (path);
+    }
+
+    if ((ret = dcc_add_cleanup(s))) {
+      /* bailing out */
+      unlink(s);
+      free(s);
+      return ret;
+    }
+
+    char *rel_s = strdup (s+14);
+    *name_ret = rel_s;
+    return 0;
+}
+
+int make_temp_dir_and_chdir_for_users ()
+{
+  int ret = 0;
+  const char *tempdir;
+  unsigned long random_bits;
+  char * temp_random_dir = NULL;
+
+  if ((ret = dcc_get_tmp_top(&tempdir)))
+    return ret;
+
+  if (access(tempdir, W_OK|X_OK) == -1) {
+      rs_log_error("can't use TMPDIR \"%s\": %s", tempdir, strerror(errno));
+      return EXIT_IO_ERROR;
+  }
+
+  random_bits = (unsigned long) getpid() << 16;
+
+# if HAVE_GETTIMEOFDAY
+    {
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        random_bits ^= tv.tv_usec << 16;
+        random_bits ^= tv.tv_sec;
+    }
+# else
+    random_bits ^= time(NULL);
+# endif
+    if (asprintf(&temp_random_dir, "%s/%08lx",
+          tempdir,
+          random_bits & 0xffffffffUL) == -1)
+      return EXIT_OUT_OF_MEMORY;
+
+    if (dcc_mk_tmpdir (temp_random_dir))
+    {
+      free (temp_random_dir);
+      return EXIT_IO_ERROR;
+    }
+
+    if (chdir(temp_random_dir) == -1) {
+      rs_log_error("failed to chdir to %s: %s",
+          temp_random_dir, strerror(errno));
+      ret = EXIT_IO_ERROR;
+    } else {
+      rs_trace("chdir to %s", temp_random_dir);
+    }
+    unlink(temp_random_dir);
+    free(temp_random_dir);
+    return ret;
 }

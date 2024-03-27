@@ -705,6 +705,7 @@ dcc_build_somewhere(char *argv[],
     char *discrepancy_filename = NULL;
     char **new_argv;
     int dist_lto = 0;
+    int dist_pgen = 0;
 
     max_retries = dcc_get_max_retries();
 
@@ -722,7 +723,7 @@ dcc_build_somewhere(char *argv[],
 
     /* FIXME: this may leak memory for argv. */
 
-    ret = dcc_scan_args(argv, &input_fname, &output_fname, &new_argv, &dist_lto);
+    ret = dcc_scan_args(argv, &input_fname, &output_fname, &new_argv, &dist_lto, &dist_pgen);
     dcc_free_argv(argv);
     argv = new_argv;
 

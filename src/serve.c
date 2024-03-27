@@ -638,7 +638,6 @@ static int make_temp_dir_and_chdir_for_cpp(int in_fd,
         return ret;
 }
 
-
 /**
  * Read a request, run the compiler, and send a response.
  **/
@@ -705,11 +704,18 @@ static int dcc_run_job(int in_fd,
             goto out_cleanup;
         changed_directory = 1;
     }
+    else
+    {
+      if ((ret = make_temp_dir_and_chdir_for_users ()))
+        goto out_cleanup;
+      changed_directory = 1;
+    }
 
     int dist_lto = 0;
+    int dist_pgen = 0;
     if ((ret = dcc_r_argv(in_fd, "ARGC", "ARGV", &argv))
         || (ret = dcc_scan_args(argv, &orig_input_tmp, &orig_output_tmp,
-                                &tweaked_argv, &dist_lto)))
+                                &tweaked_argv, &dist_lto, &dist_pgen)))
         goto out_cleanup;
 
     /* The orig_input_tmp and orig_output_tmp values returned by dcc_scan_args()
@@ -729,9 +735,12 @@ static int dcc_run_job(int in_fd,
     argv = tweaked_argv;
     tweaked_argv = NULL;
 
-    rs_trace("output file %s", orig_output);
-    if ((ret = dcc_make_tmpnam("distccd", ".o", &temp_o)))
-        goto out_cleanup;
+    if (!dist_pgen)
+      {
+        rs_trace("output file %s", orig_output);
+        if ((ret = dcc_make_tmp_dir_obj(orig_output, &temp_o)))
+          goto out_cleanup;
+      }
 
     /* if the protocol is multi-file, then we need to do the following
      * in a loop.
@@ -750,72 +759,106 @@ static int dcc_run_job(int in_fd,
         if ((ret = dcc_input_tmpnam(orig_input, &temp_i)))
             goto out_cleanup;
         if ((ret = dcc_r_token_file(in_fd, "DOTI", temp_i, compr))
-            || (ret = dcc_set_input(argv, temp_i))
-            || (ret = dcc_set_output(argv, temp_o)))
+            || (ret = dcc_set_input(argv, temp_i)))
             goto out_cleanup;
 
-	int profile_use_gcda = 0;
-	char * profile_use_path = NULL;
-	char * a;
-	if (!dist_lto)
-	  for (int i = 0; (a = argv[i]); i++) {
-	    if (a[0] == '-') {
-	      if (!strncmp(a, "-fprofile-use", 13))
-		profile_use_gcda = 1;
-	      if (!strncmp(a, "-fprofile-use=", 14))
-		{
-		  size_t len = strlen(a) - 14 + 1;
-		  profile_use_path = malloc (len);
-		  memset ( profile_use_path, 0, len);
-		  strncpy(profile_use_path, a+14, len);
-		  rs_trace("profile_use_path: %s", profile_use_path);
-		  memset (argv[i], 0, strlen(a));
-		  if (profile_use_path[0] == '/')
-		    strncpy(argv[i], "-fprofile-use", 13);
-		  else
-		    strncpy(argv[i], "-fprofile-use=./", 15);
-		  rs_trace("argv[i]: %s", argv[i]);
-		}
-	    }
-	  }
+        if (dist_pgen)
+        {
+          FILE *ftemp_i = fopen ( temp_i, "r");
+          if (ftemp_i == NULL)
+            goto out_cleanup;
 
-	unsigned gcda_exist = 0;
-	if (profile_use_gcda)
-	  {
-	    if ((ret = dcc_r_token_int(in_fd, "GCDA", &gcda_exist)) != 0) {
-	      rs_trace("fail to send token %s", strerror(errno));
-	      goto out_cleanup;
-	    }
-	  }
+          char buf[2*PATH_MAX];
+          char c[] = "\"";
+          fgets(buf, sizeof(buf), ftemp_i);
+          fgets(buf, sizeof(buf), ftemp_i);
+          rs_trace ("client dir:%s", buf);
 
-	if (gcda_exist)
-	{
-	  const char * dot = dcc_find_extension_const(temp_o);
-	  size_t len = strlen(temp_o) - strlen(dot) + strlen(".gcda") + 1;
-	  if (profile_use_path)
-	    len += strlen (profile_use_path);
-	  temp_gcda = malloc (len);
-	  memset (temp_gcda, 0, len);
+          char *p = strtok(buf, c);
+          rs_trace ("%s\n", p);
+          p = strtok(NULL, c);
+          rs_trace ("%s\n", p);
 
-	  if (profile_use_path && profile_use_path[0] != '/')
-	    strncpy (temp_gcda, profile_use_path, strlen(profile_use_path));
+          char new_output[2*PATH_MAX];
+          memset(new_output, 0, sizeof (new_output));
+          strncpy (new_output, p+1, strlen(p)-2);
+          strcat (new_output, orig_output);
+          rs_trace ("orig_output: %s\n", orig_output);
+          rs_trace ("new_output: %s\n", new_output);
 
-	  strncat(temp_gcda, temp_o, strlen(temp_o) - strlen(dot));
-	  strcat(temp_gcda, ".gcda");
-	  if (profile_use_path)
-	    free (profile_use_path);
+          rs_trace("output file %s", new_output);
+          if ((ret = dcc_make_tmp_dir_obj(new_output, &temp_o)))
+            goto out_cleanup;
 
-	  rs_trace("temp_gcda: %s", temp_gcda);
+          ret = dcc_set_output (argv, temp_o);
 
-	  if ((ret = dcc_add_cleanup(temp_gcda))) {
-	    /* bailing out */
-	    unlink(temp_gcda);
-	    goto out_cleanup;
-	  }
+          rewind(ftemp_i);
+          fclose (ftemp_i);
+        } else if ((ret = dcc_set_output(argv, temp_o)))
+          goto out_cleanup;
 
-	  if ((ret = dcc_r_token_file(in_fd, "DOTI", temp_gcda, compr)))
-	    goto out_cleanup;
-	}
+        int profile_use_gcda = 0;
+        char * profile_use_path = NULL;
+        char * a;
+        if (!dist_lto)
+          for (int i = 0; (a = argv[i]); i++) {
+            if (a[0] == '-') {
+              if (!strncmp(a, "-fprofile-use", 13))
+                profile_use_gcda = 1;
+              if (!strncmp(a, "-fprofile-use=", 14))
+              {
+                size_t len = strlen(a) - 14 + 1;
+                profile_use_path = malloc (len);
+                memset ( profile_use_path, 0, len);
+                strncpy(profile_use_path, a+14, len);
+                rs_trace("profile_use_path: %s", profile_use_path);
+                memset (argv[i], 0, strlen(a));
+                if (profile_use_path[0] == '/')
+                  strncpy(argv[i], "-fprofile-use", 13);
+                else
+                  strncpy(argv[i], "-fprofile-use=./", 15);
+                rs_trace("argv[i]: %s", argv[i]);
+              }
+            }
+          }
+
+        unsigned gcda_exist = 0;
+        if (profile_use_gcda)
+        {
+          if ((ret = dcc_r_token_int(in_fd, "GCDA", &gcda_exist)) != 0) {
+            rs_trace("fail to send token %s", strerror(errno));
+            goto out_cleanup;
+          }
+        }
+
+        if (gcda_exist)
+        {
+          const char * dot = dcc_find_extension_const(temp_o);
+          size_t len = strlen(temp_o) - strlen(dot) + strlen(".gcda") + 1;
+          if (profile_use_path)
+            len += strlen (profile_use_path);
+          temp_gcda = malloc (len);
+          memset (temp_gcda, 0, len);
+
+          if (profile_use_path && profile_use_path[0] != '/')
+            strncpy (temp_gcda, profile_use_path, strlen(profile_use_path));
+
+          strncat(temp_gcda, temp_o, strlen(temp_o) - strlen(dot));
+          strcat(temp_gcda, ".gcda");
+          if (profile_use_path)
+            free (profile_use_path);
+
+          rs_trace("temp_gcda: %s", temp_gcda);
+
+          if ((ret = dcc_add_cleanup(temp_gcda))) {
+            /* bailing out */
+            unlink(temp_gcda);
+            goto out_cleanup;
+          }
+
+          if ((ret = dcc_r_token_file(in_fd, "DOTI", temp_gcda, compr)))
+            goto out_cleanup;
+        }
     }
 
     if (!dcc_remap_compiler(&argv[0]))
